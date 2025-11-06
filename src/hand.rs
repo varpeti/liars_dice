@@ -2,28 +2,23 @@ use rand::rngs::ThreadRng;
 
 use crate::die::Die;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Hand {
-    dice: Vec<Die>,
+    pub dice: Vec<Die>,
 }
 
 impl Hand {
-    pub fn empty() -> Self {
-        Self { dice: vec![] }
+    pub fn new(starting_hand_size: usize) -> Self {
+        Self {
+            dice: vec![Die { face: 1 }; starting_hand_size],
+        }
     }
 
-    pub fn len(&self) -> usize {
-        self.dice.len()
-    }
-
-    pub fn roll(&mut self, hand_size: u8, rng: &mut ThreadRng) {
+    pub fn roll(&mut self, rng: &mut ThreadRng) {
+        let hand_size = self.dice.len();
         self.dice.clear();
         for _ in 0..hand_size {
             self.dice.push(Die::roll(rng))
         }
-    }
-
-    pub fn show(&self) -> &Vec<Die> {
-        &self.dice
     }
 }

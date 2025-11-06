@@ -1,11 +1,10 @@
-use std::collections::hash_map::Entry;
-
+use indexmap::map::Entry;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use tcprs::{MsgFromPlayerToGame, msg_to_player};
 use tokio::sync::mpsc::Receiver;
 
-use crate::player::{self, Player, Players};
+use crate::player::{Player, Players};
 
 #[derive(Debug, Deserialize)]
 enum MsgIn {
@@ -20,12 +19,12 @@ enum MsgOut {
     },
     AlreadyConnected,
     UnkownMessage(String),
-    GameStarted,
 }
 
 pub async fn wait_for_players_to_join(
     to_game_rx: &mut Receiver<MsgFromPlayerToGame>,
     number_of_players: usize,
+    starting_hand_size: usize,
 ) -> Players {
     let mut players = Players::new();
 
@@ -39,7 +38,7 @@ pub async fn wait_for_players_to_join(
                 }
                 Entry::Vacant(vacant_entry) => {
                     info!("Player `{}` connected!", player.name);
-                    vacant_entry.insert(Player::new(player.clone()));
+                    vacant_entry.insert(Player::new(player.clone(), starting_hand_size));
                     msg_to_player(
                         &player,
                         MsgOut::Connected {
@@ -63,10 +62,4 @@ pub async fn wait_for_players_to_join(
         }
     }
     players
-}
-
-pub async fn notify_players_game_started(players: &Players) {
-    for (_, player) in players {
-        msg_to_player(&player.tcprs_player, MsgOut::GameStarted).await;
-    }
 }

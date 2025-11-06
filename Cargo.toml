@@ -15,3 +15,4 @@ tcprs = { path = "../tcprs" }
 tokio = { version = "1.47", features = ["full", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 uuid = { version = "1.18", features = ["v4", "serde"] }
+indexmap = "2.12"
