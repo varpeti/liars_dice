@@ -13,7 +13,7 @@ use crate::game::{Game, GameConfig};
 const IP_PORT: &str = "127.0.0.1:5942";
 const BUFFER_SIZE: usize = 1024;
 const NUMBER_OF_PLAYERS: usize = 2;
-const TURN_DURATION_MS: u64 = 20000;
+const TURN_DURATION_MS: u64 = 200000;
 const STARTING_HAND_SIZE: usize = 5;
 
 #[tokio::main]

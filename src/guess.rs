@@ -9,6 +9,6 @@ impl Guess {
     }
 
     pub fn start() -> Self {
-        Self { number: 0, face: 1 }
+        Self { number: 0, face: 0 }
     }
 }

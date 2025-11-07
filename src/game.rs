@@ -32,14 +32,15 @@ enum Action {
 enum MsgOut {
     // Notifications
     GameStarted,
-    GameEnded,
+    GameEnded {
+        winner: String,
+    },
     // Admin
     Reconnected,
     GameAlreadyStarted,
     UnkownMessage(String),
     NotYourTurn,
     // Responses
-    InvalidBid(String),
     Turn {
         turn: usize,
         number: u8,
@@ -50,9 +51,10 @@ enum MsgOut {
         result: String,
         revealed_hands: HashMap<String, Vec<u8>>,
     },
-    YourRolled {
+    YouRolled {
         hand: Vec<u8>,
     },
+    YourTurn, // TODO:
 }
 
 pub struct GameConfig {
@@ -96,15 +98,18 @@ impl Game {
         self.roll().await;
         self.turn(Guess::start()).await;
         self.game_loop().await;
-        notify_players(&self.players, MsgOut::GameEnded).await;
+        let winner = &self.players[0];
+        notify_players(
+            &self.players,
+            MsgOut::GameEnded {
+                winner: winner.tcprs_player.name.clone(),
+            },
+        )
+        .await;
     }
 
     async fn game_loop(&mut self) {
-        self.collect_player_actions().await;
-    }
-
-    async fn collect_player_actions(&mut self) {
-        loop {
+        while self.number_of_remaining_players > 1 {
             let mut action_done = false;
             while let Ok(Some(msg)) = timeout(
                 Duration::from_millis(self.config.turn_duration_ms),
@@ -184,26 +189,30 @@ impl Game {
     }
 
     async fn action_i_think_there_are(&mut self, guess: Guess) {
-        let player = &self.get_current_player().tcprs_player;
-
+        let invalid_bid = "they placed an InvalidBid:";
         if guess.face < 1 || guess.face > 6 {
-            msg_to_player(
-                player,
-                MsgOut::InvalidBid("Face must be between 1 and 6".to_string()),
+            self.round(
+                true,
+                format!("{invalid_bid} Face must be between 1 and 6"),
+                true,
             )
             .await;
             return;
         }
         if self.current_guess.face != 1 {
             // Normal bid
-            let mut number = guess.number;
+            let mut number = self.current_guess.number;
             if guess.face == 1 {
                 number = number.div_ceil(2);
             }
-            if number <= guess.number && self.current_guess.face <= guess.face {
-                msg_to_player(
-                    player,
-                    MsgOut::InvalidBid("Number or Face must be increased!".to_string()),
+            if !(number < guess.number || self.current_guess.face < guess.face) {
+                self.round(
+                    true,
+                    format!(
+                        "{} Number `{}<{}` or Face `{}<{}` must be increased!",
+                        invalid_bid, number, guess.number, self.current_guess.face, guess.face
+                    ),
+                    true,
                 )
                 .await;
                 return;
@@ -211,16 +220,18 @@ impl Game {
         } else {
             // Joker bid
             if guess.face == 1 && self.current_guess.number >= guess.face {
-                msg_to_player(
-                    player,
-                    MsgOut::InvalidBid("Number must be increased!".to_string()),
+                self.round(
+                    true,
+                    format!("{invalid_bid} Number must be increased on Joker bid!"),
+                    true,
                 )
                 .await;
                 return;
             } else if (self.current_guess.number * 2) >= guess.face {
-                msg_to_player(
-                    player,
-                    MsgOut::InvalidBid("Number must be Double +1 or higher!".to_string()),
+                self.round(
+                    true,
+                    format!("{invalid_bid} Number must be Double +1 or higher on Joker bid when changing Face!"),
+                    true,
                 )
                 .await;
                 return;
@@ -260,21 +271,21 @@ impl Game {
             std::cmp::Ordering::Less => (
                 false,
                 format!(
-                    "Player `@@@` lost one die because there is less `{}` face `{}` than guessed `{}`",
+                    "there is less `{}` face `{}` than guessed `{}`",
                     sum, self.current_guess.face, self.current_guess.number
                 ),
             ),
             std::cmp::Ordering::Equal => (
                 true,
                 format!(
-                    "Player `@@@` lost one die because there are eaxtly `{}` face `{}` ",
+                    "there are eaxtly `{}` face `{}` ",
                     sum, self.current_guess.face
                 ),
             ),
             std::cmp::Ordering::Greater => (
                 true,
                 format!(
-                    "Player @@@ lost one die because there are more `{}` face `{}` than guessed `{}`",
+                    "there are more `{}` face `{}` than guessed `{}`",
                     sum, self.current_guess.face, self.current_guess.number
                 ),
             ),
@@ -297,21 +308,21 @@ impl Game {
             std::cmp::Ordering::Less => (
                 true,
                 format!(
-                    "Player `@@@` lost one die because there is less `{}` face `{}` than guessed `{}`",
+                    "there is less `{}` face `{}` than guessed `{}`",
                     sum, self.current_guess.face, self.current_guess.number
                 ),
             ),
             std::cmp::Ordering::Equal => (
                 false,
                 format!(
-                    "Player `@@@` won one extra die because there are eaxtly `{}` face `{}` ",
+                    "there are eaxtly `{}` face `{}` ",
                     sum, self.current_guess.face
                 ),
             ),
             std::cmp::Ordering::Greater => (
                 true,
                 format!(
-                    "Player @@@ lost one die because there are more `{}` face `{}` than guessed `{}`",
+                    "there are more `{}` face `{}` than guessed `{}`",
                     sum, self.current_guess.face, self.current_guess.number
                 ),
             ),
@@ -320,11 +331,11 @@ impl Game {
     }
 
     async fn action_idle(&mut self) {
-        let reason = "Player `@@@` did not take action in time!".to_string();
+        let reason = "they did not take action in time!".to_string();
         self.round(true, reason, true).await;
     }
 
-    async fn round(&mut self, is_current_player: bool, result: String, lost: bool) {
+    async fn round(&mut self, is_current_player: bool, mut result: String, lost: bool) {
         let mut revealed_hands = HashMap::new();
         for player in self.players.values() {
             revealed_hands.insert(
@@ -339,9 +350,11 @@ impl Game {
             self.get_previous_player_mut()
         };
 
-        let result = result.replace("@@@", &player.tcprs_player.name);
-
         if lost {
+            result = format!(
+                "Player `{}` lost one die because {}",
+                player.tcprs_player.name, result
+            );
             player.hand.dice.pop();
 
             if player.hand.dice.is_empty() {
@@ -352,11 +365,12 @@ impl Game {
                     .expect("At least one Player");
                 self.players.insert(uuid, player);
                 self.number_of_remaining_players -= 1;
-                if self.number_of_remaining_players == 0 {
-                    self.game_end().await;
-                }
             }
         } else {
+            result = format!(
+                "Player `{}` gained one extra die because {}",
+                player.tcprs_player.name, result
+            );
             player.hand.dice.push(Die { face: 1 });
         }
 
@@ -378,16 +392,12 @@ impl Game {
             player.hand.roll(&mut self.rng);
             msg_to_player(
                 &player.tcprs_player,
-                MsgOut::YourRolled {
+                MsgOut::YouRolled {
                     hand: player.hand.dice.iter().map(|d| d.face).collect(),
                 },
             )
             .await
         }
-    }
-
-    async fn game_end(&mut self) {
-        todo!()
     }
 
     fn get_current_player(&self) -> &Player {
